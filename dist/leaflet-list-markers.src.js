@@ -1,7 +1,7 @@
 /* 
- * Leaflet List Markers v0.1.0 - 2017-11-26 
+ * Leaflet List Markers v0.1.1 - 2023-07-25 
  * 
- * Copyright 2017 Stefano Cudini 
+ * Copyright 2023 Stefano Cudini 
  * stefano.cudini@gmail.com 
  * https://opengeo.tech/ 
  * 
@@ -14,175 +14,212 @@
  * git@github.com:stefanocudini/leaflet-list-markers.git 
  * 
  */
+(function () {
+  L.Control.ListMarkers = L.Control.extend({
+    includes: L.version[0] === '1' ? L.Evented.prototype : L.Mixin.Events,
 
-(function() {
+    options: {
+      layer: false,
+      maxItems: 500,
+      collapsed: false,
+      label: 'title',
+      itemIcon: L.Icon.Default.imagePath + '/icon_page.svg',
+      maxZoom: 18,
+      position: 'bottomleft',
+    },
 
-L.Control.ListMarkers = L.Control.extend({
+    initialize: function (options) {
+      L.Util.setOptions(this, options);
+      this._container = null;
+      this._list = null;
+      this._layer = this.options.layer || new L.LayerGroup();
+    },
 
-	includes: L.version[0]==='1' ? L.Evented.prototype : L.Mixin.Events,
+    onAdd: function (map) {
+      this._map = map;
 
-	options: {		
-		layer: false,
-		maxItems: 20,
-		collapsed: false,		
-		label: 'title',
-		itemIcon: L.Icon.Default.imagePath+'/marker-icon.png',
-		itemArrow: '&#10148;',	//visit: https://character-code.com/arrows-html-codes.php
-		maxZoom: 9,
-		position: 'bottomleft'
-		//TODO autocollapse
-	},
+      var container = (this._container = L.DomUtil.create(
+        'div',
+        'list-markers',
+      ));
 
-	initialize: function(options) {
-		L.Util.setOptions(this, options);
-		this._container = null;
-		this._list = null;
-		this._layer = this.options.layer || new L.LayerGroup();
-	},
+      this._list = L.DomUtil.create('div', 'list-markers-list', container);
 
-	onAdd: function (map) {
+      this._initToggle();
 
-		this._map = map;
-	
-		var container = this._container = L.DomUtil.create('div', 'list-markers');
+      map.on('moveend', this._updateList, this);
 
-		this._list = L.DomUtil.create('ul', 'list-markers-ul', container);
+      this._updateList();
 
-		this._initToggle();
+      return container;
+    },
 
-		map.on('moveend', this._updateList, this);
-			
-		this._updateList();
+    onRemove: function (map) {
+      map.off('moveend', this._updateList, this);
+      this._container = null;
+      this._list = null;
+    },
 
-		return container;
-	},
-	
-	onRemove: function(map) {
-		map.off('moveend', this._updateList, this);
-		this._container = null;
-		this._list = null;		
-	},
+    _createItem: function (layer) {
+      const markerItemDiv = L.DomUtil.create('div', 'list-markers-item'),
+        referenceDiv = L.DomUtil.create(
+          'div',
+          'list-marker__link',
+          markerItemDiv,
+        ),
+        informationDiv = L.DomUtil.create(
+          'div',
+          'list-marker__info',
+          markerItemDiv,
+        ),
+        pageIndicatorDiv = L.DomUtil.create(
+          'div',
+          'list-marker__page-indicator',
+          markerItemDiv,
+        ),
+        a = L.DomUtil.create('a', '', referenceDiv),
+        icon = this.options.itemIcon
+          ? '<img src="' + this.options.itemIcon + '" />'
+          : '',
+        that = this;
 
-	_createItem: function(layer) {
+      a.href = '#';
+      pageIndicatorDiv.innerHTML = `${layer.options.pageIndicator}`;
+      informationDiv.innerHTML = `${layer.options.siteInformation}`;
+      L.DomEvent.disableClickPropagation(a)
+        .on(a, 'click', L.DomEvent.stop, this)
+        .on(
+          a,
+          'click',
+          function (e) {
+            this._moveTo(layer.getLatLng());
+            layer.openPopup();
+          },
+          this,
+        )
+        .on(
+          a,
+          'mouseover',
+          function (e) {
+            that.fire('item-mouseover', { layer: layer });
+          },
+          this,
+        )
+        .on(
+          a,
+          'mouseout',
+          function (e) {
+            that.fire('item-mouseout', { layer: layer });
+          },
+          this,
+        );
 
-		var li = L.DomUtil.create('li', 'list-markers-li'),
-			a = L.DomUtil.create('a', '', li),
-			icon = this.options.itemIcon ? '<img src="'+this.options.itemIcon+'" />' : '',
-			that = this;
+      //console.log('_createItem',layer.options);
 
-		a.href = '#';
-		L.DomEvent
-			.disableClickPropagation(a)
-			.on(a, 'click', L.DomEvent.stop, this)
-			.on(a, 'click', function(e) {
-				this._moveTo( layer.getLatLng() );
-			}, this)
-			.on(a, 'mouseover', function(e) {
-				that.fire('item-mouseover', {layer: layer });
-			}, this)
-			.on(a, 'mouseout', function(e) {
-				that.fire('item-mouseout', {layer: layer });
-			}, this);			
+      if (layer.options.hasOwnProperty(this.options.label)) {
+        a.innerHTML = `<span> ${layer.options[this.options.label]} </span>`;
+      } else
+        console.log(
+          "propertyName '" + this.options.label + "' not found in marker",
+        );
 
-			
-		
-		//console.log('_createItem',layer.options);
+      return markerItemDiv;
+    },
 
-		if( layer.options.hasOwnProperty(this.options.label) )
-		{
-			a.innerHTML = icon+'<span>'+layer.options[this.options.label]+'</span> <b>'+this.options.itemArrow+'</b>';
-			//TODO use related marker icon!
-			//TODO use template for item
-		}
-		else
-			console.log("propertyName '"+this.options.label+"' not found in marker");
+    _updateList: function () {
+      var that = this,
+        n = 0;
 
-		return li;
-	},
+      this._list.innerHTML = '';
+      this._layer.eachLayer(function (layer) {
+        if (layer instanceof L.Marker)
+          if (that._map.getBounds().contains(layer.getLatLng()))
+            if (++n < that.options.maxItems)
+              that._list.appendChild(that._createItem(layer));
+      });
+    },
 
-	_updateList: function() {
-	
-		var that = this,
-			n = 0;
+    _initToggle: function () {
+      /* inspired by L.Control.Layers */
 
-		this._list.innerHTML = '';
-		this._layer.eachLayer(function(layer) {
-			if(layer instanceof L.Marker)
-				if( that._map.getBounds().contains(layer.getLatLng()) )
-					if(++n < that.options.maxItems)
-						that._list.appendChild( that._createItem(layer) );
-		});
-	},
+      var container = this._container;
 
-	_initToggle: function () {
+      //Makes this work on IE10 Touch devices by stopping it from firing a mouseout event when the touch is released
+      container.setAttribute('aria-haspopup', true);
 
-		/* inspired by L.Control.Layers */
+      if (!L.Browser.touch) {
+        L.DomEvent.disableClickPropagation(container);
+        //.disableScrollPropagation(container);
+      } else {
+        L.DomEvent.on(container, 'click', L.DomEvent.stopPropagation);
+      }
 
-		var container = this._container;
+      if (this.options.collapsed) {
+        this._collapse();
 
-		//Makes this work on IE10 Touch devices by stopping it from firing a mouseout event when the touch is released
-		container.setAttribute('aria-haspopup', true);
+        if (!L.Browser.android) {
+          L.DomEvent.on(container, 'mouseover', this._expand, this).on(
+            container,
+            'mouseout',
+            this._collapse,
+            this,
+          );
+        }
+        var link = (this._button = L.DomUtil.create(
+          'a',
+          'list-markers-toggle',
+          container,
+        ));
+        link.href = '#';
+        link.title = 'List Markers';
 
-		if (!L.Browser.touch) {
-			L.DomEvent
-				.disableClickPropagation(container);
-				//.disableScrollPropagation(container);
-		} else {
-			L.DomEvent.on(container, 'click', L.DomEvent.stopPropagation);
-		}
+        if (L.Browser.touch) {
+          L.DomEvent.on(link, 'click', L.DomEvent.stop).on(
+            link,
+            'click',
+            this._expand,
+            this,
+          );
+        } else {
+          L.DomEvent.on(link, 'focus', this._expand, this);
+        }
 
-		if (this.options.collapsed)
-		{
-			this._collapse();
+        this._map.on('click', this._collapse, this);
+        // TODO keyboard accessibility
+      }
+    },
 
-			if (!L.Browser.android) {
-				L.DomEvent
-					.on(container, 'mouseover', this._expand, this)
-					.on(container, 'mouseout', this._collapse, this);
-			}
-			var link = this._button = L.DomUtil.create('a', 'list-markers-toggle', container);
-			link.href = '#';
-			link.title = 'List Markers';
+    _expand: function () {
+      this._container.className = this._container.className.replace(
+        ' list-markers-collapsed',
+        '',
+      );
+    },
 
-			if (L.Browser.touch) {
-				L.DomEvent
-					.on(link, 'click', L.DomEvent.stop)
-					.on(link, 'click', this._expand, this);
-			}
-			else {
-				L.DomEvent.on(link, 'focus', this._expand, this);
-			}
+    _collapse: function () {
+      L.DomUtil.addClass(this._container, 'list-markers-collapsed');
+    },
 
-			this._map.on('click', this._collapse, this);
-			// TODO keyboard accessibility
-		}
-	},
+    _moveTo: function (latlng) {
+      if (this.options.maxZoom)
+        this._map.setView(
+          latlng,
+          Math.max(this._map.getZoom(), this.options.maxZoom),
+        );
+      else this._map.panTo(latlng);
+    },
+  });
 
-	_expand: function () {
-		this._container.className = this._container.className.replace(' list-markers-collapsed', '');
-	},
-
-	_collapse: function () {
-		L.DomUtil.addClass(this._container, 'list-markers-collapsed');
-	},
-
-    _moveTo: function(latlng) {
-		if(this.options.maxZoom)
-			this._map.setView(latlng, Math.min(this._map.getZoom(), this.options.maxZoom) );
-		else
-			this._map.panTo(latlng);    
-    }
-});
-
-L.control.listMarkers = function (options) {
+  L.control.listMarkers = function (options) {
     return new L.Control.ListMarkers(options);
-};
+  };
 
-L.Map.addInitHook(function () {
+  L.Map.addInitHook(function () {
     if (this.options.listMarkersControl) {
-        this.listMarkersControl = L.control.listMarkers(this.options.listMarkersControl);
-        this.addControl(this.listMarkersControl);
+      this.listMarkersControl = L.control.listMarkers(
+        this.options.listMarkersControl,
+      );
+      this.addControl(this.listMarkersControl);
     }
-});
-
+  });
 }).call(this);
