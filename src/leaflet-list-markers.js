@@ -16,25 +16,27 @@
       L.Util.setOptions(this, options);
       this._container = null;
       this._list = null;
+      this._listCount = null;
       this._layer = this.options.layer || new L.LayerGroup();
     },
 
     onAdd: function (map) {
       this._map = map;
 
-      var container = (this._container = L.DomUtil.create(
+      const container = (this._container = L.DomUtil.create(
         'div',
         'list-markers',
       ));
 
       this._list = L.DomUtil.create('div', 'list-markers-list', container);
 
+      this._listCount = document.querySelector('.panel__tabs__list__count');
+
       this._initToggle();
 
       map.on('moveend', this._updateList, this);
 
       this._updateList();
-
       return container;
     },
 
@@ -111,7 +113,7 @@
     },
 
     _updateList: function () {
-      var that = this,
+      let that = this,
         n = 0;
 
       this._list.innerHTML = '';
@@ -121,12 +123,14 @@
             if (++n < that.options.maxItems)
               that._list.appendChild(that._createItem(layer));
       });
+
+      this._listCount.innerHTML = ` (${n})`;
     },
 
     _initToggle: function () {
       /* inspired by L.Control.Layers */
 
-      var container = this._container;
+      const container = this._container;
 
       //Makes this work on IE10 Touch devices by stopping it from firing a mouseout event when the touch is released
       container.setAttribute('aria-haspopup', true);
@@ -149,7 +153,7 @@
             this,
           );
         }
-        var link = (this._button = L.DomUtil.create(
+        const link = (this._button = L.DomUtil.create(
           'a',
           'list-markers-toggle',
           container,
